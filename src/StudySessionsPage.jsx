@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from './context/AuthContext'
+import { useClasses } from './context/ClassesContext'
+import { subscribeSessions, createSession } from './services/firestore'
 import SessionChat from './SessionChat'
 import CreateSessionModal from './CreateSessionModal'
 
@@ -124,92 +127,79 @@ function SessionCard({ session, onOpen }) {
   )
 }
 
-const SESSIONS = [
-  {
-    id: 1,
-    title: 'Midterm Prep – Trees & Graphs',
-    joined: true,
-    host: 'M. Smith',
-    attendingCount: 4,
-    date: 'Thursday, Apr 10',
-    time: '6:00 PM – 8:00 PM',
-    location: 'Tech LG52 – Study Lounge',
-    topics: ['trees', 'graphs', 'midterm_review'],
-    description: 'Going through HW4 problems on BFS/DFS and practicing tree traversal problems from past exams.',
-    attendees: [
-      { initials: 'MS', name: 'M. Smith',  color: 'purple' },
-      { initials: 'AI', name: 'Alex I.',   color: 'teal'   },
-      { initials: 'JK', name: 'J. Kim',    color: 'orange' },
-      { initials: 'PW', name: 'P. Wong',   color: 'green'  },
-    ],
-    spotsTotal: 8,
-  },
-  {
-    id: 2,
-    title: 'Dynamic Programming',
-    joined: false,
-    host: 'Jordan Lee',
-    attendingCount: 2,
-    date: 'Saturday, Apr 12',
-    time: '2:00 PM – 4:00 PM',
-    location: 'Mudd Library – Room 3300',
-    topics: ['dynamic_programming', 'recursion', 'memoization'],
-    description: 'Working through classic DP problems — knapsack, longest common subsequence, and coin change.',
-    attendees: [
-      { initials: 'JL', name: 'Jordan Lee', color: 'blue' },
-      { initials: 'RK', name: 'R. Kim',     color: 'pink' },
-    ],
-    spotsTotal: 6,
-  },
-]
-
 function StudySessions() {
+  const { user } = useAuth()
+  const { activeClass } = useClasses()
+  const classId = activeClass?.id || null
+
   const [openSession, setOpenSession] = useState(null)
   const [query, setQuery] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [sessions, setSessions] = useState(() => {
-    try {
-      const saved = localStorage.getItem('classhub-sessions')
-      return saved ? JSON.parse(saved) : SESSIONS
-    } catch {
-      return SESSIONS
-    }
-  })
+  const [sessions, setSessions] = useState([])
 
-  function handleCreate({ name, description, participants, date, time, location, topics }) {
-    const newSession = {
-      id: sessions.length + 1,
-      title: name,
-      joined: true,
-      host: 'You',
-      attendingCount: participants.length + 1,
-      date,
-      time,
-      location,
-      topics,
-      description,
-      attendees: [{ initials: 'UN', name: 'You', color: 'purple' }, ...participants],
-      spotsTotal: 10,
+  // Subscribe to Firestore sessions for the active class
+  useEffect(() => {
+    setSessions([])
+    let unsub = null
+    try {
+      unsub = subscribeSessions(classId, (items) => setSessions(items))
+    } catch (e) {
+      console.warn('subscribeSessions failed:', e)
     }
-    setSessions(prev => {
-      const updated = [newSession, ...prev]
-      localStorage.setItem('classhub-sessions', JSON.stringify(updated))
-      return updated
-    })
+    return () => { try { unsub?.() } catch (_) {} }
+  }, [classId])
+
+  async function handleCreate({ name, description, participants, date, time, location, topics }) {
+    if (!classId) return
+    const authorName = user?.displayName || (user?.email ? user.email.split('@')[0] : 'You')
+    const initials = authorName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    const meAttendee = { id: user?.uid || 'guest', name: authorName, initials, color: 'purple' }
+    try {
+      await createSession(classId, {
+        title: name,
+        description,
+        host: authorName,
+        hostId: user?.uid || null,
+        hostInitials: initials,
+        hostColor: 'purple',
+        date,
+        time,
+        location,
+        topics,
+        spotsTotal: 10,
+        attendees: [meAttendee, ...participants],
+      })
+    } catch (e) {
+      console.error('createSession failed:', e)
+    }
   }
 
-  const filtered = sessions.filter((s) => {
-    const q = query.toLowerCase()
-    return (
-      s.title.toLowerCase().includes(q) ||
-      s.host.toLowerCase().includes(q) ||
-      s.location.toLowerCase().includes(q) ||
-      s.topics.some((t) => t.toLowerCase().includes(q))
-    )
-  })
+  // Map Firestore doc to the shape SessionCard + SessionChat expect
+  function mapSession(s) {
+    const attendees = s.attendees || []
+    const attendeeIds = s.attendeeIds || attendees.map(a => a.id || a.initials)
+    const joined = !!(user?.uid && attendeeIds.includes(user.uid)) || s.hostId === user?.uid
+    return {
+      ...s,
+      joined,
+      attendingCount: attendees.length,
+    }
+  }
+
+  const filtered = sessions
+    .map(mapSession)
+    .filter((s) => {
+      const q = query.toLowerCase()
+      return (
+        (s.title || '').toLowerCase().includes(q) ||
+        (s.host || '').toLowerCase().includes(q) ||
+        (s.location || '').toLowerCase().includes(q) ||
+        (s.topics || []).some((t) => t.toLowerCase().includes(q))
+      )
+    })
 
   if (openSession) {
-    return <SessionChat session={openSession} onBack={() => setOpenSession(null)} />
+    return <SessionChat session={openSession} classId={classId} onBack={() => setOpenSession(null)} />
   }
 
   return (
@@ -224,11 +214,14 @@ function StudySessions() {
       <div className="bg-brand rounded-card p-5 flex items-center justify-between">
         <div>
           <h2 className="text-white font-bold text-xl">Study Sessions</h2>
-          <p className="text-brand-light text-label mt-0.5">Schedule and join peer study sessions for this course</p>
+          <p className="text-brand-light text-label mt-0.5">
+            {activeClass ? `${activeClass.code} — ${activeClass.title}` : 'Schedule and join peer study sessions'}
+          </p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="bg-white text-brand font-semibold text-label px-4 py-2 rounded-btn hover:bg-brand-light transition-colors flex-shrink-0"
+          disabled={!classId}
+          className="bg-white text-brand font-semibold text-label px-4 py-2 rounded-btn hover:bg-brand-light transition-colors flex-shrink-0 disabled:opacity-40"
         >
           + Create Session
         </button>
@@ -237,9 +230,9 @@ function StudySessions() {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'Upcoming Sessions', value: '4'  },
-          { label: 'Students Joined',   value: '18' },
-          { label: 'My Sessions',       value: '1'  },
+          { label: 'Upcoming Sessions', value: sessions.length },
+          { label: 'Students Joined',   value: sessions.reduce((acc, s) => acc + (s.attendees?.length || 0), 0) },
+          { label: 'My Sessions',       value: sessions.filter(s => s.hostId === user?.uid).length },
         ].map((s) => (
           <div key={s.label} className="bg-surface rounded-card border border-line p-4 text-center">
             <p className="text-2xl font-bold text-brand">{s.value}</p>
@@ -257,16 +250,23 @@ function StudySessions() {
         className="w-full bg-surface border border-line rounded-btn px-4 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-brand"
       />
 
+      {/* No class selected */}
+      {!classId && (
+        <div className="text-center py-12 text-muted text-label">
+          Select a class from the sidebar to see its study sessions.
+        </div>
+      )}
+
       {/* Session cards */}
-      {filtered.length > 0 ? (
+      {classId && filtered.length > 0 ? (
         filtered.map((s) => (
           <SessionCard key={s.id} session={s} onOpen={() => setOpenSession(s)} />
         ))
-      ) : (
+      ) : classId ? (
         <div className="text-center py-12 text-muted text-label">
-          No sessions match "{query}"
+          {query ? `No sessions match "${query}"` : 'No study sessions yet. Create one!'}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

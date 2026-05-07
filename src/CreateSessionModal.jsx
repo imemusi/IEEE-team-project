@@ -207,7 +207,7 @@ export default function CreateSessionModal({ onClose, onCreate }) {
 
           {/* Topics (optional) */}
           <div className="px-4 mt-5">
-            <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-2">🏷 Topics <span className="normal-case font-normal">(optional)</span></p>
+            <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-2">Topics <span className="normal-case font-normal">(optional)</span></p>
             <input
               type="text"
               value={topicInput}

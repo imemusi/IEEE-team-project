@@ -35,6 +35,20 @@ service cloud.firestore {
       }
     }
 
+    // Study sessions (class-scoped)
+    match /classes/{classId}/sessions/{sessionId} {
+      allow read: if isAuthed();
+      allow create: if isAuthed();
+      allow update: if isAuthed();
+      allow delete: if isAuthed() && resource.data.hostId == request.auth.uid;
+
+      match /messages/{msgId} {
+        allow read: if isAuthed();
+        allow create: if isAuthed();
+        allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+      }
+    }
+
     // Class chat — scoped per class under classes/{classId}/chat
     match /classes/{classId}/chat/{msgId} {
       allow read: if isAuthed();

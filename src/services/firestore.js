@@ -14,6 +14,7 @@ import {
   getDoc,
   runTransaction,
   where,
+  deleteDoc,
 } from 'firebase/firestore'
 
 // -- Chat/messages (class-scoped) --
@@ -181,5 +182,77 @@ export async function voteQuestion(classId, questionId, userId, voteValue) {
 
     tx.update(qRef, { voters, votes: (data.votes || 0) + delta })
     return { votes: (data.votes || 0) + delta, voters }
+  })
+}
+
+// -- Study Sessions (class-scoped) --
+function sessionsCol(classId) {
+  return collection(db, `classes/${classId}/sessions`)
+}
+function sessionMessagesCol(classId, sessionId) {
+  return collection(db, `classes/${classId}/sessions/${sessionId}/messages`)
+}
+
+export function subscribeSessions(classId, onUpdate) {
+  if (!classId) { onUpdate([]); return () => {} }
+  const q = query(sessionsCol(classId), orderBy('createdAt', 'desc'))
+  return onSnapshot(
+    q,
+    (snap) => { onUpdate(snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))) },
+    (err) => { console.warn(`classes/${classId}/sessions snapshot error:`, err.code, err.message) }
+  )
+}
+
+export async function createSession(classId, { title, description, host, hostId, hostInitials, hostColor, date, time, location, topics, spotsTotal, attendees }) {
+  return addDoc(sessionsCol(classId), {
+    title,
+    description: description || '',
+    host: host || null,
+    hostId: hostId || null,
+    hostInitials: hostInitials || 'UN',
+    hostColor: hostColor || 'purple',
+    date: date || '',
+    time: time || '',
+    location: location || '',
+    topics: topics || [],
+    spotsTotal: spotsTotal || 10,
+    attendees: attendees || [],
+    attendeeIds: (attendees || []).map((a) => a.id || a.initials),
+    createdAt: serverTimestamp(),
+  })
+}
+
+export async function joinSession(classId, sessionId, attendee) {
+  const ref = doc(db, `classes/${classId}/sessions`, sessionId)
+  const snap = await getDoc(ref)
+  if (!snap.exists()) throw new Error('session not found')
+  const data = snap.data() || {}
+  const attendees = data.attendees || []
+  const attendeeIds = data.attendeeIds || []
+  if (attendeeIds.includes(attendee.id)) return // already joined
+  await updateDoc(ref, {
+    attendees: [...attendees, attendee],
+    attendeeIds: [...attendeeIds, attendee.id],
+  })
+}
+
+export function subscribeSessionMessages(classId, sessionId, onUpdate) {
+  if (!classId || !sessionId) { onUpdate([]); return () => {} }
+  const q = query(sessionMessagesCol(classId, sessionId), orderBy('createdAt', 'asc'))
+  return onSnapshot(
+    q,
+    (snap) => { onUpdate(snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))) },
+    (err) => { console.warn(`sessions/${sessionId}/messages snapshot error:`, err.code, err.message) }
+  )
+}
+
+export async function sendSessionMessage(classId, sessionId, { text, authorName, authorId, authorInitials, authorColor }) {
+  return addDoc(sessionMessagesCol(classId, sessionId), {
+    text,
+    authorName: authorName || null,
+    authorId: authorId || null,
+    authorInitials: authorInitials || 'UN',
+    authorColor: authorColor || 'purple',
+    createdAt: serverTimestamp(),
   })
 }

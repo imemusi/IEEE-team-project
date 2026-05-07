@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import { useAuth } from './context/AuthContext'
+import { subscribeSessionMessages, sendSessionMessage } from './services/firestore'
 
 function Avatar({ initials, color }) {
   const colors = {
@@ -22,7 +24,7 @@ function ChatMessage({ message, isOwn }) {
       {!isOwn && <Avatar initials={message.authorInitials} color={message.authorColor} />}
       <div className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
         {!isOwn && (
-          <span className="text-xxs text-muted px-1">{message.author}</span>
+          <span className="text-xxs text-muted px-1">{message.author || message.authorName || 'Student'}</span>
         )}
         <div className={`px-3 py-2 rounded-card text-label leading-relaxed ${
           isOwn
@@ -37,29 +39,74 @@ function ChatMessage({ message, isOwn }) {
   )
 }
 
-export default function SessionChat({ session, onBack }) {
+export default function SessionChat({ session, classId, onBack }) {
+  const { user } = useAuth()
   // Chat placeholders removed — start with an empty message list
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const bottomRef = useRef(null)
 
+  // Real-time Firestore subscription — scoped to this session
+  useEffect(() => {
+    setMessages([])
+    let unsub = null
+    try {
+      unsub = subscribeSessionMessages(classId, session.id, (items) => {
+        setMessages(items.map((m) => ({
+          id: m.id,
+          text: m.text,
+          author: m.authorName,
+          authorInitials: m.authorInitials || 'UN',
+          authorColor: m.authorColor || 'purple',
+          isOwn: m.authorId === user?.uid,
+          time: m.createdAt?.toDate
+            ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+        })))
+      })
+    } catch (e) {
+      console.warn('subscribeSessionMessages failed:', e)
+    }
+    return () => { try { unsub?.() } catch (_) {} }
+  }, [classId, session.id, user?.uid])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  function getAuthorInfo() {
+    const name = user?.displayName || (user?.email ? user.email.split('@')[0] : 'You')
+    const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    return { name, initials, color: 'purple' }
+  }
+
   function sendMessage() {
     const text = input.trim()
-    if (!text) return
-    setMessages(prev => [...prev, {
-      id: prev.length + 1,
-      author: 'You',
-      authorInitials: 'UN',
-      authorColor: 'purple',
+    if (!text || !classId) return
+    const author = getAuthorInfo()
+    const localId = `local_${Date.now()}`
+    const optimistic = {
+      id: localId,
       text,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      author: author.name,
+      authorInitials: author.initials,
+      authorColor: author.color,
       isOwn: true,
-    }])
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }
+    setMessages(prev => [...prev, optimistic])
     setInput('')
+    sendSessionMessage(classId, session.id, {
+      text,
+      authorName: author.name,
+      authorId: user?.uid || null,
+      authorInitials: author.initials,
+      authorColor: author.color,
+    }).then(() => {
+      setMessages(prev => prev.filter(m => m.id !== localId))
+    }).catch((e) => {
+      console.warn('sendSessionMessage failed, keeping local fallback', e)
+    })
   }
 
   function handleKeyDown(e) {
@@ -80,8 +127,11 @@ export default function SessionChat({ session, onBack }) {
         >
           ←
         </button>
-        <div className="w-9 h-9 rounded-card bg-brand flex items-center justify-center text-lg flex-shrink-0">
-          {session.emoji}
+        <div className="w-9 h-9 rounded-card bg-brand flex items-center justify-center flex-shrink-0">
+          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+          </svg>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-primary font-semibold text-label truncate">{session.title}</p>
@@ -108,6 +158,9 @@ export default function SessionChat({ session, onBack }) {
         {messages.map((msg) => (
           <ChatMessage key={msg.id} message={msg} isOwn={msg.isOwn} />
         ))}
+        {messages.length === 0 && (
+          <p className="text-center text-muted text-xxs py-8">No messages yet. Say hi!</p>
+        )}
         <div ref={bottomRef} />
       </div>
 
