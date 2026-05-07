@@ -1,21 +1,31 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import { useClasses } from './context/ClassesContext';
 import { useNavigate } from 'react-router-dom';
+import { subscribeSessions } from './services/firestore';
 
 export default function DashboardOverview() {
   const { user } = useAuth();
-  const { classes, setActiveClass } = useClasses();
+  const { classes, activeClass, setActiveClass } = useClasses();
   const navigate = useNavigate();
+  const [upcomingSessions, setUpcomingSessions] = useState([]);
+
+  // Subscribe to sessions for the active class (or first class as fallback)
+  const sessionClassId = activeClass?.id || classes[0]?.id || null;
+  useEffect(() => {
+    let unsub = null;
+    try {
+      unsub = subscribeSessions(sessionClassId, (items) => setUpcomingSessions(items));
+    } catch (e) {
+      console.warn('subscribeSessions (dashboard) failed:', e);
+    }
+    return () => { try { unsub?.() } catch (_) {} };
+  }, [sessionClassId]);
 
   const handleClassClick = (cls) => {
     setActiveClass(cls);
     navigate('/chat');
   };
-
-  const upcomingSessions = [
-    { id: 1, title: 'Midterm Prep – Trees & Graphs', time: 'Today, 6:00 PM', attendees: 4 },
-    { id: 2, title: 'Dynamic Programming', time: 'Saturday, 2:00 PM', attendees: 2 },
-  ];
 
   return (
     <div className="flex-1 overflow-y-auto p-8 bg-page">
@@ -26,7 +36,9 @@ export default function DashboardOverview() {
             Welcome back, {user?.displayName?.split(' ')[0] || 'Student'}!
           </h1>
           <p className="text-brand-light font-medium text-lg">
-            You have 2 study sessions coming up this week.
+            {upcomingSessions.length > 0
+              ? `You have ${upcomingSessions.length} study session${upcomingSessions.length === 1 ? '' : 's'} coming up.`
+              : 'No study sessions scheduled yet.'}
           </p>
         </div>
       </div>
@@ -79,18 +91,25 @@ export default function DashboardOverview() {
           <section>
             <h2 className="text-xl font-bold text-primary mb-4">Upcoming Sessions</h2>
             <div className="bg-surface border border-line rounded-xl p-4 space-y-4">
-              {upcomingSessions.map(session => (
-                <div key={session.id} className="flex gap-3 items-start">
-                  <div className="w-10 h-10 rounded-lg bg-brand-light flex items-center justify-center text-xl flex-shrink-0">
-                    <span className="text-brand font-bold text-xs">SYS</span>
+              {upcomingSessions.length === 0 ? (
+                <p className="text-xs text-muted text-center py-4">No upcoming sessions yet.</p>
+              ) : (
+                upcomingSessions.slice(0, 3).map(session => (
+                  <div key={session.id} className="flex gap-3 items-start">
+                    <div className="w-10 h-10 rounded-lg bg-brand-light flex items-center justify-center flex-shrink-0">
+                      <svg className="w-5 h-5 text-brand" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-primary leading-tight mb-1">{session.title}</h4>
+                      <p className="text-xs text-brand font-medium mb-1">{session.date} · {session.time}</p>
+                      <p className="text-xs text-sub">{(session.attendees || []).length} attending</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-primary leading-tight mb-1">{session.title}</h4>
-                    <p className="text-xs text-brand font-medium mb-1">{session.time}</p>
-                    <p className="text-xs text-sub">{session.attendees} attending</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
               <div className="pt-2">
                 <button 
                   onClick={() => navigate('/study')}
