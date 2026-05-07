@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
+import { useClasses } from './context/ClassesContext';
 import { subscribeToQuestions, postQuestion, getQuestionReplies, addQuestionReply, voteQuestion, subscribeRepliesByUser } from './services/firestore';
 
 function Tag({ label, isActive }) {
@@ -10,7 +11,7 @@ function Tag({ label, isActive }) {
   );
 }
 
-function Question({ qdoc, isMentorView, onAddReply }) {
+function Question({ qdoc, classId, isMentorView, onAddReply }) {
   const { id, authorName, role, title, text, time, tags, votes = 0, isForUpperclassmen } = qdoc
   const [currentVotes, setCurrentVotes] = useState(votes);
   const [userVote, setUserVote] = useState(0);
@@ -21,38 +22,37 @@ function Question({ qdoc, isMentorView, onAddReply }) {
   const { user } = useAuth()
 
   useEffect(() => {
-    // reflect initial votes and user vote from voters map if present
     setCurrentVotes(qdoc.votes || 0)
     if (qdoc.voters && user) setUserVote(qdoc.voters[user.uid] || 0)
   }, [qdoc, user])
 
   useEffect(() => {
+    if (!classId) return
     let unsub = null
     try {
-      unsub = getQuestionReplies(id, (items) => setReplies(items))
+      unsub = getQuestionReplies(classId, id, (items) => setReplies(items))
     } catch (e) {
       console.warn('could not subscribe to replies', e)
     }
     return () => { try { unsub && unsub() } catch (_) {} }
-  }, [id])
+  }, [classId, id])
 
   const handleVote = async (val) => {
     if (!user) {
       alert('Please sign in to vote')
       return
     }
-    const numeric = val // 1 or -1
+    const numeric = val
     const optimisticDelta = (numeric === userVote) ? -userVote : (numeric - userVote)
     setCurrentVotes((v) => v + optimisticDelta)
     const prevVote = userVote
     const newVote = numeric === userVote ? 0 : numeric
     setUserVote(newVote)
     try {
-      const result = await voteQuestion(id, user.uid, newVote)
+      const result = await voteQuestion(classId, id, user.uid, newVote)
       setCurrentVotes(result.votes)
     } catch (e) {
       console.error('vote failed', e)
-      // rollback
       setUserVote(prevVote)
       setCurrentVotes((v) => v - optimisticDelta)
     }
@@ -124,7 +124,7 @@ function Question({ qdoc, isMentorView, onAddReply }) {
               e.preventDefault()
               if (!replyText.trim()) return
               try {
-                await addQuestionReply(id, { text: replyText.trim(), authorName: user?.displayName, authorId: user?.uid, anonymous: false })
+                await addQuestionReply(classId, id, { text: replyText.trim(), authorName: user?.displayName, authorId: user?.uid, anonymous: false })
                 setReplyText('')
                 setReplying(false)
               } catch (e) {
@@ -150,6 +150,8 @@ function Question({ qdoc, isMentorView, onAddReply }) {
 function QAndA({ isMentorView = false }) {
   const scrollRef = useRef(null);
   const { user } = useAuth()
+  const { activeClass } = useClasses()
+  const classId = activeClass?.id || null
   const [showModal, setShowModal] = useState(false);
   const [questionTitle, setQuestionTitle] = useState('');
   const [questionBody, setQuestionBody] = useState('');
@@ -174,8 +176,8 @@ function QAndA({ isMentorView = false }) {
 
   const submitQuestion = (event) => {
     event.preventDefault();
-    // Persist to Firestore
-    postQuestion({
+    if (!classId) return
+    postQuestion(classId, {
       title: questionTitle,
       text: questionBody,
       authorName: user?.displayName || 'Anonymous',
@@ -189,7 +191,6 @@ function QAndA({ isMentorView = false }) {
       setShowModal(false)
     }).catch((e) => {
       console.error('postQuestion failed', e)
-      // fallback local behavior
       setQuestionTitle('')
       setQuestionBody('')
       setAskUpperclassmen(false)
@@ -253,14 +254,15 @@ function QAndA({ isMentorView = false }) {
   ];
 
   useEffect(() => {
+    setQuestions([])
     let unsub = null
     try {
-      unsub = subscribeToQuestions((items) => setQuestions(items))
+      unsub = subscribeToQuestions(classId, (items) => setQuestions(items))
     } catch (e) {
       console.warn('subscribeToQuestions failed:', e.message)
     }
     return () => { try { unsub?.() } catch (_) {} }
-  }, [])
+  }, [classId])
 
   // subscribe to replies authored by current user so we can filter "Questions I Answered"
   useEffect(() => {
@@ -284,7 +286,9 @@ function QAndA({ isMentorView = false }) {
         <div className="bg-surface rounded-card border border-line p-4 flex items-center justify-between">
           <div>
             <h2 className="text-primary font-bold text-lg">
-              {isMentorView ? 'Questions for Upperclassmen in CS 111' : 'CS214 - Data Structures and Algorithms'}
+              {isMentorView
+                ? `Questions for Upperclassmen${activeClass ? ` in ${activeClass.code}` : ''}`
+                : activeClass ? `${activeClass.code} — ${activeClass.title}` : 'Q&A'}
             </h2>
             <p className="text-label text-sub mt-0.5">
               <span className="text-brand font-medium">{isMentorView ? '2 Answered' : '4 Answered'}</span>
@@ -339,6 +343,7 @@ function QAndA({ isMentorView = false }) {
           <Question
             key={q.id}
             qdoc={q}
+            classId={classId}
             isMentorView={isMentorView}
           />
         ))}

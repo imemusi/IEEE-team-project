@@ -79,22 +79,26 @@ export async function sendClassReply(classId, parentId, { text, anonymous, autho
   })
 }
 
-// -- Q&A --
-export function subscribeToQuestions(onUpdate) {
-  const q = query(collection(db, 'qa'), orderBy('createdAt', 'desc'))
+// -- Q&A (class-scoped) --
+function qaCol(classId) {
+  return collection(db, `classes/${classId}/qa`)
+}
+
+export function subscribeToQuestions(classId, onUpdate) {
+  if (!classId) { onUpdate([]); return () => {} }
+  const q = query(qaCol(classId), orderBy('createdAt', 'desc'))
   return onSnapshot(
     q,
     (snap) => {
       const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))
       onUpdate(items)
     },
-    (err) => { console.warn('qa snapshot error:', err.code, err.message) }
+    (err) => { console.warn(`classes/${classId}/qa snapshot error:`, err.code, err.message) }
   )
 }
 
-export async function postQuestion({ title, text, authorName, authorId, isForUpperclassmen = false, tags = [] }) {
-  const col = collection(db, 'qa')
-  return addDoc(col, {
+export async function postQuestion(classId, { title, text, authorName, authorId, isForUpperclassmen = false, tags = [] }) {
+  return addDoc(qaCol(classId), {
     title,
     text,
     authorName: authorName || null,
@@ -107,8 +111,8 @@ export async function postQuestion({ title, text, authorName, authorId, isForUpp
   })
 }
 
-export async function addQuestionReply(questionId, { text, authorName, authorId, anonymous }) {
-  const repliesCol = collection(db, `qa/${questionId}/replies`)
+export async function addQuestionReply(classId, questionId, { text, authorName, authorId, anonymous }) {
+  const repliesCol = collection(db, `classes/${classId}/qa/${questionId}/replies`)
   const r = await addDoc(repliesCol, {
     text,
     authorName: authorName || null,
@@ -116,21 +120,20 @@ export async function addQuestionReply(questionId, { text, authorName, authorId,
     anonymous: !!anonymous,
     createdAt: serverTimestamp(),
   })
-  // increment replyCount on question
-  const qDoc = doc(db, 'qa', questionId)
+  const qDoc = doc(db, `classes/${classId}/qa`, questionId)
   await updateDoc(qDoc, { replyCount: increment(1) })
   return r
 }
 
-export function getQuestionReplies(questionId, onUpdate) {
-  const repliesQuery = query(collection(db, `qa/${questionId}/replies`), orderBy('createdAt', 'asc'))
+export function getQuestionReplies(classId, questionId, onUpdate) {
+  const repliesQuery = query(collection(db, `classes/${classId}/qa/${questionId}/replies`), orderBy('createdAt', 'asc'))
   return onSnapshot(
     repliesQuery,
     (snap) => {
       const items = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
       onUpdate(items)
     },
-    (err) => { console.warn(`qa/${questionId}/replies snapshot error:`, err.code, err.message) }
+    (err) => { console.warn(`classes/${classId}/qa/${questionId}/replies snapshot error:`, err.code, err.message) }
   )
 }
 
@@ -156,26 +159,22 @@ export function subscribeRepliesByUser(userId, onUpdate) {
 
 /**
  * Atomically apply a user's vote to a question and enforce one-vote-per-user.
- * voteValue should be 1 (upvote), -1 (downvote), or 0 (remove vote).
  */
-export async function voteQuestion(questionId, userId, voteValue) {
+export async function voteQuestion(classId, questionId, userId, voteValue) {
   if (!userId) throw new Error('userId required to vote')
-  const qRef = doc(db, 'qa', questionId)
+  const qRef = doc(db, `classes/${classId}/qa`, questionId)
   return runTransaction(db, async (tx) => {
     const qSnap = await tx.get(qRef)
     if (!qSnap.exists()) throw new Error('question not found')
     const data = qSnap.data() || {}
-    const voters = data.voters || {} // voters: { userId: number }
+    const voters = data.voters || {}
     const current = voters[userId] || 0
 
-    // If same vote, remove it
     let delta = 0
     if (voteValue === current) {
-      // remove vote
       delete voters[userId]
       delta = -current
     } else {
-      // set new vote
       voters[userId] = voteValue
       delta = voteValue - current
     }

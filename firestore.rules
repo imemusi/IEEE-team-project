@@ -6,7 +6,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Q&A collection
+    // Q&A collection — class-scoped
+    match /classes/{classId}/qa/{questionId} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthed();
+      allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+
+      match /replies/{replyId} {
+        allow read: if isAuthed();
+        allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
+        allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    // Legacy flat Q&A (keep for backwards compat)
     match /qa/{questionId} {
       allow read: if isAuthed();
       allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
