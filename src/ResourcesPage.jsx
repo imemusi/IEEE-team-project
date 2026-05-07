@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
+import { useClasses } from './context/ClassesContext';
 import { db, storage } from './firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 const RESOURCE_TAGS = ['Notes', 'Past Exams', 'Study Guides', 'Other'];
 
@@ -14,26 +15,28 @@ export default function ResourcesPage() {
   const [tag, setTag] = useState('Notes');
   const [filterTag, setFilterTag] = useState('All');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const { user } = useAuth();
+  const { activeClass } = useClasses();
+  const classId = activeClass?.id || null;
 
+  // Subscribe to resources for the active class
   useEffect(() => {
-    let unsubscribe = null
+    setResources([]);
+    if (!classId) return;
+    let unsubscribe = null;
     try {
-      const q = query(collection(db, 'resources'), orderBy('createdAt', 'desc'));
+      const q = query(collection(db, `classes/${classId}/resources`), orderBy('createdAt', 'desc'));
       unsubscribe = onSnapshot(q, (snapshot) => {
-        const resourcesData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setResources(resourcesData);
+        setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }, (err) => {
-        console.warn('resources snapshot error:', err.code, err.message)
+        console.warn('resources snapshot error:', err.code, err.message);
       });
     } catch (e) {
-      console.warn('resources onSnapshot failed:', e.message)
+      console.warn('resources onSnapshot failed:', e.message);
     }
-    return () => { try { unsubscribe?.() } catch (_) {} }
-  }, []);
+    return () => { try { unsubscribe?.() } catch (_) {} };
+  }, [classId]);
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -47,31 +50,44 @@ export default function ResourcesPage() {
 
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-    if (pendingFile && user) {
-      setIsUploading(true);
-      try {
-        const fileRef = ref(storage, `resources/${Date.now()}_${pendingFile.name}`);
-        const snapshot = await uploadBytes(fileRef, pendingFile);
-        const downloadURL = await getDownloadURL(snapshot.ref);
+    if (!pendingFile || !user || !classId) return;
+    setIsUploading(true);
+    setUploadProgress(0);
+    try {
+      const storageRef = ref(storage, `classes/${classId}/resources/${Date.now()}_${pendingFile.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, pendingFile);
 
-        await addDoc(collection(db, 'resources'), {
-          name: pendingFile.name,
-          type: pendingFile.type || 'File',
-          description: description,
-          tag: tag,
-          uploader: user.displayName || 'Anonymous',
-          size: (pendingFile.size / 1024 / 1024).toFixed(2) + ' MB',
-          url: downloadURL,
-          createdAt: serverTimestamp(),
-        });
+      await new Promise((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snap) => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject,
+          resolve,
+        );
+      });
 
-        handleCloseModal();
-      } catch (error) {
-        console.error("Error uploading file: ", error);
-        alert("Failed to upload file. Please try again.");
-      } finally {
-        setIsUploading(false);
-      }
+      const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+      await addDoc(collection(db, `classes/${classId}/resources`), {
+        name: pendingFile.name,
+        type: pendingFile.type || 'File',
+        description: description,
+        tag: tag,
+        uploader: user.displayName || user.email?.split('@')[0] || 'Anonymous',
+        uploaderId: user.uid,
+        size: pendingFile.size < 1024 * 1024
+          ? (pendingFile.size / 1024).toFixed(1) + ' KB'
+          : (pendingFile.size / 1024 / 1024).toFixed(2) + ' MB',
+        url: downloadURL,
+        createdAt: serverTimestamp(),
+      });
+
+      handleCloseModal();
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -95,16 +111,21 @@ export default function ResourcesPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-extrabold text-primary mb-2">Study Resources</h1>
-            <p className="text-sub">Share and access notes, previous exams, and study guides.</p>
+            <p className="text-sub">
+              {activeClass
+                ? `${activeClass.code} — ${activeClass.title}`
+                : 'Select a class from the sidebar to view resources.'}
+            </p>
           </div>
           
           <div>
-            <label className="cursor-pointer bg-brand hover:bg-brand-hover text-white px-4 py-2 rounded-lg font-medium transition-colors inline-block">
+            <label className={`cursor-pointer bg-brand hover:bg-brand-hover text-white px-4 py-2 rounded-lg font-medium transition-colors inline-block ${!classId ? 'opacity-40 pointer-events-none' : ''}`}>
               Upload File
               <input 
                 type="file" 
                 className="hidden" 
-                onChange={handleFileSelect} 
+                onChange={handleFileSelect}
+                disabled={!classId}
               />
             </label>
           </div>
@@ -227,9 +248,17 @@ export default function ResourcesPage() {
                   className="px-4 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
                   disabled={!description.trim() || isUploading}
                 >
-                  {isUploading ? 'Uploading...' : 'Upload File'}
+                  {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
                 </button>
               </div>
+              {isUploading && (
+                <div className="mt-3 w-full bg-line rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-brand h-1.5 rounded-full transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
             </form>
           </div>
         </div>

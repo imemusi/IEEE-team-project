@@ -64,7 +64,9 @@ The Firebase Emulator UI is at `http://localhost:4000`.
 ```bash
 npm run build
 ```
+To redeploy in the future after changes, just run
 
+npm run build && firebase deploy --only hosting,firestore:rules --project ieee-studyspace
 ---
 
 ## Project Structure

@@ -2,11 +2,19 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Uploaded resources — authenticated users can read; only uploader can delete
-    match /resources/{allPaths=**} {
+    // Class-scoped resources — authenticated users can read; uploader can delete
+    match /classes/{classId}/resources/{fileName} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
                     && request.resource.size < 20 * 1024 * 1024; // 20 MB limit
+      allow delete: if request.auth != null;
+    }
+
+    // Legacy flat resources path (backwards compat)
+    match /resources/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.size < 20 * 1024 * 1024;
       allow delete: if request.auth != null;
     }
 

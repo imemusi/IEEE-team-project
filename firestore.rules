@@ -78,7 +78,14 @@ service cloud.firestore {
       }
     }
 
-    // Resources
+    // Class-scoped resources metadata
+    match /classes/{classId}/resources/{resId} {
+      allow read: if isAuthed();
+      allow create: if isAuthed();
+      allow update, delete: if isAuthed() && resource.data.uploaderId == request.auth.uid;
+    }
+
+    // Legacy flat resources (backwards compat)
     match /resources/{resId} {
       allow read: if isAuthed();
       allow create: if isAuthed();
