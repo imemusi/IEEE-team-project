@@ -27,7 +27,7 @@ function Avatar({ initials, color }) {
 }
 
 function SessionCard({ session, onOpen }) {
-  const { emoji, title, joined, host, attendingCount, date, time, location, topics, description, attendees, spotsTotal } = session
+  const { title, joined, host, attendingCount, date, time, location, topics, description, attendees, spotsTotal } = session
   const spotsFilled = attendees.length
   const spotsLeft = spotsTotal - spotsFilled
 
@@ -43,8 +43,10 @@ function SessionCard({ session, onOpen }) {
       {/* Card header */}
       <div className="bg-brand p-4 flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-card bg-brand-hover flex items-center justify-center text-2xl flex-shrink-0">
-            {emoji}
+          <div className="w-12 h-12 rounded-card bg-brand-hover flex items-center justify-center flex-shrink-0">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
           </div>
           <h3 className="text-white font-bold text-base leading-tight">{title}</h3>
         </div>
@@ -67,21 +69,21 @@ function SessionCard({ session, onOpen }) {
       {/* Details */}
       <div className="px-4 py-3 space-y-2.5">
         <div className="flex gap-3">
-          <span className="text-muted mt-0.5">🕐</span>
+          <svg className="w-4 h-4 text-muted mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <div>
             <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-0.5">Date &amp; Time</p>
             <p className="text-label text-primary">{date} · {time}</p>
           </div>
         </div>
         <div className="flex gap-3">
-          <span className="text-muted mt-0.5">📍</span>
+          <svg className="w-4 h-4 text-muted mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
           <div>
             <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-0.5">Location</p>
             <p className="text-label text-primary">{location}</p>
           </div>
         </div>
         <div className="flex gap-3">
-          <span className="text-muted mt-0.5">🏷</span>
+          <svg className="w-4 h-4 text-muted mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
           <div>
             <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-0.5">Topics</p>
             <div className="flex flex-wrap gap-1 mt-1">
@@ -90,7 +92,7 @@ function SessionCard({ session, onOpen }) {
           </div>
         </div>
         <div className="flex gap-3">
-          <span className="text-muted mt-0.5">👤</span>
+          <svg className="w-4 h-4 text-muted mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <div>
             <p className="text-xxs text-muted font-semibold uppercase tracking-widest mb-0.5">Description</p>
             <p className="text-label text-sub leading-relaxed">{description}</p>
@@ -114,7 +116,7 @@ function SessionCard({ session, onOpen }) {
           <span className="text-xxs text-muted">{spotsFilled}/{spotsTotal} spots</span>
           {joined
             ? <span className="text-xxs text-brand font-medium">Open chat →</span>
-            : <span className="text-xxs text-muted">🔒 Members only</span>
+            : <span className="text-xxs text-muted">Members only</span>
           }
         </div>
       </div>
@@ -125,7 +127,6 @@ function SessionCard({ session, onOpen }) {
 const SESSIONS = [
   {
     id: 1,
-    emoji: '📚',
     title: 'Midterm Prep – Trees & Graphs',
     joined: true,
     host: 'M. Smith',
@@ -145,7 +146,6 @@ const SESSIONS = [
   },
   {
     id: 2,
-    emoji: '💡',
     title: 'Dynamic Programming',
     joined: false,
     host: 'Jordan Lee',
@@ -179,7 +179,6 @@ function StudySessions() {
   function handleCreate({ name, description, participants, date, time, location, topics }) {
     const newSession = {
       id: sessions.length + 1,
-      emoji: '📚',
       title: name,
       joined: true,
       host: 'You',
